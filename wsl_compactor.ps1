@@ -291,6 +291,10 @@ exit
           Write-Host $_
         }
       }
+      $diskpartExitCode = $LASTEXITCODE
+      if ($diskpartExitCode -ne 0) {
+        throw "DiskPart failed for '$($j.Name)' with exit code $diskpartExitCode."
+      }
       $optimized = $true
     }
     finally {
