@@ -33,7 +33,7 @@ Click the “Fork” button in the top-right corner of this page.
 ### 2. Clone your fork  
 
 ```bash
-git clone https://github.com/brooks-code/WSL-VHDX-Compact.git
+git clone https://github.com/hyperphantasia/WSL-VHDX-Compact.git
 cd WSL-VHDX-Compact
 ```
 
