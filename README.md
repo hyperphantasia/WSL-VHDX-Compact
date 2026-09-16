@@ -235,6 +235,28 @@ The script performs the following actions:
 
 - The script throws errors on missing admin rights, missing registry entries, missing ext4.vhdx file, or failed WSL shutdown.
 - When `fstrim` fails it logs a warning and continues.
+- A failed DiskPart compaction is reported for that distro without marking it
+  optimized. The remaining distros are still processed, and every result is
+  included in the summary. After the summary, any failed compaction raises an
+  aggregate error (`powershell.exe -File` exits with code 1); all-success runs
+  exit with code 0. DiskPart's native exit code is checked, not localized text.
+
+### Testing
+
+Run the regression tests from the repository root in Windows PowerShell 5.1:
+
+```powershell
+powershell.exe -NoProfile -File .\tests\Test-Compaction.ps1
+```
+
+No administrator rights or additional modules are needed. The tests execute
+the script's compaction loop and summary in isolated PowerShell processes,
+substitute DiskPart and Optimize-VHD, and use only disposable text files. They
+never enumerate distros, trim disks, shut down WSL, or compact a real VHDX.
+They verify native process exit handling, per-distro results, continuation,
+fallback and temporary-script cleanup, not physical VHD attachment or space
+reclamation. Small synthetic diagnostic files are retained at the printed
+temporary path.
 
 ### Misc
 
