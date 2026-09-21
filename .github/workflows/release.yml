@@ -296,15 +296,17 @@ jobs:
             wsl_compactor.ps1
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-artifacts
           if-no-files-found: error
           retention-days: 7
           path: |
             wsl_compactor.ps1
+            wsl2compact.ps1
             wsl2compact.exe
             checksums.txt
+
 
   publish:
     name: Publish packages and GitHub Release
@@ -328,46 +330,57 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
+      
           $files = @(
             'wsl_compactor.ps1',
+            'wsl2compact.ps1',
             'wsl2compact.exe',
             'checksums.txt'
           )
-
+      
           foreach ($file in $files) {
             if (-not (Test-Path -LiteralPath $file)) {
               throw "Missing downloaded artifact: $file"
             }
           }
-
-          $result = Get-FileHash `
-            -LiteralPath .\wsl_compactor.ps1 `
-            -Algorithm SHA256
-
-          $expected = (
-            Get-Content -LiteralPath .\checksums.txt |
-              Where-Object { $_ -match '\s+wsl_compactor\.ps1$' }
-          ).Split()[0]
-
-          if ($result.Hash -ne $expected) {
-            throw "wsl_compactor.ps1 checksum verification failed"
+      
+          $checksums = Get-Content -LiteralPath .\checksums.txt
+      
+          foreach ($file in @(
+            'wsl_compactor.ps1',
+            'wsl2compact.exe'
+          )) {
+            $actual = (
+              Get-FileHash `
+                -LiteralPath $file `
+                -Algorithm SHA256
+            ).Hash.ToLowerInvariant()
+      
+            $line = $checksums |
+              Where-Object { $_ -match ("\s+" + [regex]::Escape($file) + '$') } |
+              Select-Object -First 1
+      
+            if (-not $line) {
+              throw "No checksum entry found for $file"
+            }
+      
+            $expected = $line.Split()[0].ToLowerInvariant()
+      
+            if ($actual -ne $expected) {
+              throw "Checksum verification failed for $file"
+            }
           }
-
-          $result = Get-FileHash `
-            -LiteralPath .\wsl2compact.exe `
-            -Algorithm SHA256
-
-          $expected = (
-            Get-Content -LiteralPath .\checksums.txt |
-              Where-Object { $_ -match '\s+wsl2compact\.exe$' }
-          ).Split()[0]
-
-          if ($result.Hash -ne $expected) {
-            throw "wsl2compact.exe checksum verification failed"
+      
+          if (
+            (Get-FileHash .\wsl_compactor.ps1 -Algorithm SHA256).Hash `
+            -ne
+            (Get-FileHash .\wsl2compact.ps1 -Algorithm SHA256).Hash
+          ) {
+            throw "wsl2compact.ps1 differs from wsl_compactor.ps1"
           }
+      
+          Write-Host "All downloaded artifacts passed verification"
 
-          Write-Host "All downloaded artifacts passed checksum verification"
 
       - name: Publish to PowerShell Gallery
         shell: pwsh
