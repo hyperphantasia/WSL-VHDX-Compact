@@ -22,6 +22,7 @@ jobs:
   build:
     name: Build and attest
     runs-on: windows-latest
+    timeout-minutes: 20
 
     permissions:
       contents: read
@@ -33,6 +34,36 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
 
     steps:
+      - name: Enforce trusted ref for manual runs
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Tag pushes are always fine; they already imply a specific
+          # immutable commit. Manual dispatch runs, on the other hand,
+          # can be launched from any branch by anyone with write access,
+          # so restrict those to the default branch only.
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            $allowedBranch = 'main'
+
+            if (-not (
+              $env:REF_TYPE -eq 'branch' -and
+              $env:REF_NAME -eq $allowedBranch
+            )) {
+              throw (
+                "workflow_dispatch releases are only allowed from " +
+                "the '$allowedBranch' branch. Triggered from " +
+                "ref_type='$env:REF_TYPE', ref_name='$env:REF_NAME'."
+              )
+            }
+          }
+
+          Write-Host "Ref check passed for event '$env:EVENT_NAME'"
+
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -296,7 +327,7 @@ jobs:
             wsl_compactor.ps1
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-artifacts
           if-no-files-found: error
@@ -312,23 +343,24 @@ jobs:
     name: Publish packages and GitHub Release
     needs: build
     runs-on: windows-latest
-  
+    timeout-minutes: 15
+
     environment:
       name: release
-  
+
     permissions:
       contents: write
-  
+
     steps:
       - name: Check out triggering ref
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
           persist-credentials: false
-  
+
       - name: Download release artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: release-artifacts
           path: .
@@ -337,22 +369,22 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-      
+
           $files = @(
             'wsl_compactor.ps1',
             'wsl2compact.ps1',
             'wsl2compact.exe',
             'checksums.txt'
           )
-      
+
           foreach ($file in $files) {
             if (-not (Test-Path -LiteralPath $file)) {
               throw "Missing downloaded artifact: $file"
             }
           }
-      
+
           $checksums = Get-Content -LiteralPath .\checksums.txt
-      
+
           foreach ($file in @(
             'wsl_compactor.ps1',
             'wsl2compact.exe'
@@ -362,22 +394,22 @@ jobs:
                 -LiteralPath $file `
                 -Algorithm SHA256
             ).Hash.ToLowerInvariant()
-      
+
             $line = $checksums |
               Where-Object { $_ -match ("\s+" + [regex]::Escape($file) + '$') } |
               Select-Object -First 1
-      
+
             if (-not $line) {
               throw "No checksum entry found for $file"
             }
-      
+
             $expected = $line.Split()[0].ToLowerInvariant()
-      
+
             if ($actual -ne $expected) {
               throw "Checksum verification failed for $file"
             }
           }
-      
+
           if (
             (Get-FileHash .\wsl_compactor.ps1 -Algorithm SHA256).Hash `
             -ne
@@ -385,7 +417,7 @@ jobs:
           ) {
             throw "wsl2compact.ps1 differs from wsl_compactor.ps1"
           }
-      
+
           Write-Host "All downloaded artifacts passed verification"
 
 
@@ -393,6 +425,7 @@ jobs:
         shell: pwsh
         env:
           NUGET_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -408,7 +441,7 @@ jobs:
 
           Write-Host (
             "Published wsl2compact v{0} to PowerShell Gallery" -f
-            "${{ needs.build.outputs.version }}"
+            $env:RELEASE_VERSION
           )
 
       - name: Create GitHub Release
@@ -418,6 +451,7 @@ jobs:
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
           REF_TYPE: ${{ github.ref_type }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
 
@@ -439,7 +473,7 @@ jobs:
           else {
             $arguments += @(
               '--target',
-              "${{ github.sha }}"
+              $env:RELEASE_SHA
             )
           }
 
@@ -457,6 +491,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           $ps1Hash = if (Test-Path .\wsl_compactor.ps1) {
             (Get-FileHash `
@@ -495,7 +530,7 @@ jobs:
             "| wsl_compactor.ps1 SHA256 | ``$ps1Hash`` |"
             "| wsl2compact.exe SHA256 | ``$exeHash`` |"
             "| wsl2compact.exe size | $exeSize |"
-            "| Release | https://github.com/${{ github.repository }}/releases/tag/$env:RELEASE_TAG |"
+            "| Release | https://github.com/$env:REPOSITORY/releases/tag/$env:RELEASE_TAG |"
           ) -join "`n" |
             Out-File `
               -FilePath $env:GITHUB_STEP_SUMMARY `
