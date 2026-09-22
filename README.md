@@ -274,7 +274,12 @@ This script is compatible with Windows systems that have WSL2 installed. It has 
 
 ## Changelog
 
-### July 2026 - Latest
+### September 2026 - Latest
+
+- **DevSecOps**: hardened the CI/CD pipeline.
+- **Bugfixes**: robust no-op check and added tests [PR#12](https://github.com/hyperphantasia/WSL-VHDX-Compact/pull/12) by jon4v
+
+### July 2026
 
 - **Added**: implemented CI/CD pipeline powered by github actions. Each push on the main branch:
   - Pushes the `.ps1` script on [PowerShell Gallery](https://www.powershellgallery.com/packages/wsl2compact/)
