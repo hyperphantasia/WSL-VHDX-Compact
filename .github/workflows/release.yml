@@ -167,12 +167,12 @@ jobs:
             -Destination .\wsl2compact.ps1 `
             -Force
 
-      - name: Install reviewed ps2exe version
+      - name: Install reviewed ps12exe version
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $requiredVersion = '1.0.18'
+          $requiredVersion = '0.6.5'
 
           $repository = Get-PSRepository `
             -Name PSGallery `
@@ -185,13 +185,13 @@ jobs:
           }
 
           Install-Module `
-            -Name ps2exe `
+            -Name ps12exe `
             -RequiredVersion $requiredVersion `
             -Scope CurrentUser `
             -Force `
             -ErrorAction Stop
 
-          $module = Get-Module ps2exe -ListAvailable |
+          $module = Get-Module ps12exe -ListAvailable |
             Where-Object {
               $_.Version.ToString() -eq $requiredVersion
             } |
@@ -199,10 +199,10 @@ jobs:
             Select-Object -First 1
 
           if (-not $module) {
-            throw "Expected ps2exe $requiredVersion was not installed"
+            throw "Expected ps12exe $requiredVersion was not installed"
           }
 
-          Write-Host "Using ps2exe $($module.Version)"
+          Write-Host "Using ps12exe $($module.Version)"
           Write-Host "Module path: $($module.ModuleBase)"
 
       - name: Prepare EXE source
@@ -235,16 +235,18 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          Invoke-ps2exe `
-            -inputFile    .\wsl2compact-console.ps1 `
-            -outputFile   .\wsl2compact.exe `
-            -version      $env:VERSION `
-            -title        "WSL VHDX Compactor" `
-            -description  "Compacts WSL2 distro VHDX files to reclaim disk space" `
-            -company      "hyperphantasia" `
-            -product      "wsl2compact" `
-            -copyright    "(c) $(Get-Date -Format yyyy) hyperphantasia" `
-            -requireAdmin
+          ps12exe `
+            -inputFile  .\wsl2compact-console.ps1 `
+            -outputFile .\wsl2compact.exe `
+            -NoUpdateCheck `
+            -Resources @{
+              Version     = $env:VERSION
+              Title       = 'WSL VHDX Compactor'
+              Description = 'Compacts WSL2 distro VHDX files to reclaim disk space'
+              Company     = 'hyperphantasia'
+              Product     = 'wsl2compact'
+              Copyright   = "(c) $(Get-Date -Format yyyy) hyperphantasia"
+            }
 
           if (-not (Test-Path -LiteralPath .\wsl2compact.exe)) {
             throw "The EXE was not created"

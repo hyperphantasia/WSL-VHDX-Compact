@@ -52,6 +52,10 @@ In an elevated terminal.
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\wsl_compactor.ps1 -DistroName Ubuntu
 #>
 
+# The compiled .exe embeds a requireAdministrator manifest so it always
+# launches elevated (ignored when this script is run directly).
+#_pragma Os.Admin
+
 [CmdletBinding()]
 param(
   [string[]]$DistroName,

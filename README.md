@@ -189,27 +189,27 @@ This command verifies and confirms that your `wsl2compact.exe` was built by this
 This project is not yet code-signed. I've applied for a free certificate. This section will be updated once signing is in place.
 
 >[!NOTE]
-> `wsl2compact.exe` is built with [PS2EXE](https://github.com/MScholtes/PS2EXE) from the `.ps1` script in this repo. Nothing more.
-> A small number of antivirus engines occasionally flag freshly-built, unsigned Windows executables as suspicious based on heuristics *rather than actual content*. This is a [well-documented](https://github.com/MScholtes/PS2EXE/issues/153) **false-positive** [pattern](https://stackoverflow.com/questions/70393526/how-do-i-compile-a-powershell-script-so-that-it-is-shown-as-safe-by-antivirus) for small open-source tools that is not unique to this project.
+> `wsl2compact.exe` is built with [ps12exe](https://github.com/steve02081504/ps12exe) from the `.ps1` script in this repo. Nothing more.
+> A small number of antivirus engines occasionally flag freshly-built, unsigned Windows executables as suspicious based on heuristics *rather than actual content*. This is a [well-documented](https://stackoverflow.com/questions/70393526/how-do-i-compile-a-powershell-script-so-that-it-is-shown-as-safe-by-antivirus) **false-positive pattern** for small open-source tools that is not unique to this project.
 
 Since you will be prompted to run a powershell script with elevated rights, be rigorous: read below how to check the contents of the `.exe` by yourself. If you'd rather avoid it entirely, use the PowerShell Gallery install method above, or read and run `wsl_compactor.ps1` directly: it's plain, unobfuscated PowerShell.
 
-After installing PS2Exe like this:
+After installing ps12exe like this:
 
 ```powershell
-Install-Module -Name ps2exe -Scope CurrentUser
+Install-Module -Name ps12exe -Scope CurrentUser
 ```
 
-You can unpack the `.exe` :
+You can unpack the `.exe` with its bundled `exe21sp` tool:
 
 ```powershell
-Import-Module ps2exe
-Invoke-PS2EXE -extract .\wsl2compact.exe -OutPath .\extracted
+Import-Module ps12exe
+exe21sp -inputFile .\wsl2compact.exe -outputFile .\extracted\wsl2compact.ps1
 ```
 
 And then inspect its content :)
 
-The only difference with [wsl_compactor.ps1](https://github.com/hyperphantasia/WSL-VHDX-Compact/blob/main/wsl_compactor.ps1) script should be the two lines bottom lines appended during packaging stage by the [`release.yml`](https://github.com/hyperphantasia/WSL-VHDX-Compact/blob/main/.github/workflows/release.yml) file (this maintains the terminal screen active and exit only on user input).
+The only differences with the [wsl_compactor.ps1](https://github.com/hyperphantasia/WSL-VHDX-Compact/blob/main/wsl_compactor.ps1) script should be the build options baked into the `.exe`, which `exe21sp` re-emits as `#_pragma` lines at the top of the file (version, title, description, company, copyright and the admin manifest), plus the two lines appended during the packaging stage by the [`release.yml`](https://github.com/hyperphantasia/WSL-VHDX-Compact/blob/main/.github/workflows/release.yml) file (this maintains the terminal screen active and exit only on user input).
 
 ```powershell
 Write-Host "`nPress any key to exit..." -ForegroundColor DarkCyan
@@ -274,7 +274,11 @@ This script is compatible with Windows systems that have WSL2 installed. It has 
 
 ## Changelog
 
-### July 2026 - Latest
+### September 2026 - Latest
+
+- **Changed**: the Windows executable is now compiled with [ps12exe](https://github.com/steve02081504/ps12exe), an actively maintained PS2EXE replacement. Same console + `requireAdministrator` behavior, smaller output. The `.exe` can still be audited with `exe21sp`.
+
+### July 2026
 
 - **Added**: implemented CI/CD pipeline powered by github actions. Each push on the main branch:
   - Pushes the `.ps1` script on [PowerShell Gallery](https://www.powershellgallery.com/packages/wsl2compact/)
