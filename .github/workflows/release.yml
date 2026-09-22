@@ -235,11 +235,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          # Version / title / company / ... come from #_pragma in the source.
           ps12exe `
             -inputFile  .\wsl2compact-console.ps1 `
             -outputFile .\wsl2compact.exe `
-            -NoUpdateCheck `
-            -Resources @{ Version = $env:VERSION }
+            -NoUpdateCheck
 
           if (-not (Test-Path -LiteralPath .\wsl2compact.exe)) {
             throw "The EXE was not created"
