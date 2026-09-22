@@ -52,9 +52,14 @@ In an elevated terminal.
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\wsl_compactor.ps1 -DistroName Ubuntu
 #>
 
-# The compiled .exe embeds a requireAdministrator manifest so it always
-# launches elevated (ignored when this script is run directly).
+# Build options baked into the compiled .exe (plain comments here, ignored
+# when this script is run directly). Version and the copyright year are
+# supplied by the release workflow.
 #_pragma Os.Admin
+#_pragma Resources.Title 'WSL VHDX Compactor'
+#_pragma Resources.Description 'Compacts WSL2 distro VHDX files to reclaim disk space'
+#_pragma Resources.Company 'hyperphantasia'
+#_pragma Resources.Product 'wsl2compact'
 
 [CmdletBinding()]
 param(

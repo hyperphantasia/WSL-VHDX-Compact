@@ -240,12 +240,8 @@ jobs:
             -outputFile .\wsl2compact.exe `
             -NoUpdateCheck `
             -Resources @{
-              Version     = $env:VERSION
-              Title       = 'WSL VHDX Compactor'
-              Description = 'Compacts WSL2 distro VHDX files to reclaim disk space'
-              Company     = 'hyperphantasia'
-              Product     = 'wsl2compact'
-              Copyright   = "(c) $(Get-Date -Format yyyy) hyperphantasia"
+              Version   = $env:VERSION
+              Copyright = "(c) $(Get-Date -Format yyyy) hyperphantasia"
             }
 
           if (-not (Test-Path -LiteralPath .\wsl2compact.exe)) {
