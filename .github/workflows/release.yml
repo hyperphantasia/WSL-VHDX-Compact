@@ -172,7 +172,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $requiredVersion = '0.6.5'
+          $requiredVersion = '0.6.6'
 
           $repository = Get-PSRepository `
             -Name PSGallery `
@@ -239,10 +239,7 @@ jobs:
             -inputFile  .\wsl2compact-console.ps1 `
             -outputFile .\wsl2compact.exe `
             -NoUpdateCheck `
-            -Resources @{
-              Version   = $env:VERSION
-              Copyright = "(c) $(Get-Date -Format yyyy) hyperphantasia"
-            }
+            -Resources @{ Version = $env:VERSION }
 
           if (-not (Test-Path -LiteralPath .\wsl2compact.exe)) {
             throw "The EXE was not created"

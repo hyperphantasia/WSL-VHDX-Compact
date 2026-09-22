@@ -53,13 +53,14 @@ In an elevated terminal.
 #>
 
 # Build options baked into the compiled .exe (plain comments here, ignored
-# when this script is run directly). Version and the copyright year are
-# supplied by the release workflow.
+# when this script is run directly). Version is supplied by the release
+# workflow; the copyright year is filled in at build time.
 #_pragma Os.Admin
 #_pragma Resources.Title 'WSL VHDX Compactor'
 #_pragma Resources.Description 'Compacts WSL2 distro VHDX files to reclaim disk space'
 #_pragma Resources.Company 'hyperphantasia'
 #_pragma Resources.Product 'wsl2compact'
+#_pragma Resources.Copyright "(c) $(Get-Date -Format yyyy) hyperphantasia"
 
 [CmdletBinding()]
 param(
