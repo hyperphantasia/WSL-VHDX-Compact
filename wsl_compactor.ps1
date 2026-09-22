@@ -60,7 +60,7 @@ In an elevated terminal.
 #_pragma Resources.Description 'Compacts WSL2 distro VHDX files to reclaim disk space'
 #_pragma Resources.Company 'hyperphantasia'
 #_pragma Resources.Product 'wsl2compact'
-#_pragma Resources.Version "$($env:VERSION)"
+#_pragma Resources.Version $env:VERSION
 #_pragma Resources.Copyright "(c) $(Get-Date -Format yyyy) hyperphantasia"
 
 [CmdletBinding()]
