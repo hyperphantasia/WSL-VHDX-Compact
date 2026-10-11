@@ -188,16 +188,6 @@ jobs:
           Write-Host "Version:     $($info.Version)"
           Write-Host "Description: $($info.Description)"
 
-      - name: Copy publish script
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          Copy-Item `
-            -LiteralPath .\wsl_compactor.ps1 `
-            -Destination .\wsl2compact.ps1 `
-            -Force
-
       - name: Install reviewed ps2exe version
         shell: pwsh
         run: |
@@ -288,6 +278,77 @@ jobs:
             $size,
             ($size / 1MB)
           )
+
+      - name: Upload unsigned artifacts
+        id: upload-unsigned
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-artifacts
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            wsl2compact.exe
+            wsl_compactor.ps1
+
+      - name: Submit signing request to SignPath
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@0743f82d8e049d7e1d14c4463be28c6035617378 # v2.0.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: wsl2compact
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Verify signatures and replace files
+        shell: pwsh
+        env:
+          REQUIRE_VALID: ${{ vars.SIGNPATH_REQUIRE_VALID_SIGNATURE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $signedDir = Join-Path $env:GITHUB_WORKSPACE 'signed'
+          $files = @('wsl2compact.exe', 'wsl_compactor.ps1')
+
+          foreach ($file in $files) {
+            $path = Join-Path $signedDir $file
+
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Signed file missing: $file"
+            }
+
+            $sig = Get-AuthenticodeSignature -LiteralPath $path
+
+            if ($null -eq $sig.SignerCertificate) {
+              throw "$file has no Authenticode signature"
+            }
+
+            Write-Host "$file signer: $($sig.SignerCertificate.Subject)"
+            Write-Host "$file status: $($sig.Status)"
+
+            if ($env:REQUIRE_VALID -eq 'true' -and $sig.Status -ne 'Valid') {
+              throw "$file signature status is '$($sig.Status)', expected 'Valid'"
+            }
+          }
+
+          foreach ($file in $files) {
+            Move-Item `
+              -LiteralPath (Join-Path $signedDir $file) `
+              -Destination (Join-Path $env:GITHUB_WORKSPACE $file) `
+              -Force
+          }
+
+      - name: Create publish script from signed source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          Copy-Item `
+            -LiteralPath .\wsl_compactor.ps1 `
+            -Destination .\wsl2compact.ps1 `
+            -Force
 
       - name: Generate checksums
         shell: pwsh
