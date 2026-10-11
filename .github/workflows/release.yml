@@ -23,6 +23,8 @@ jobs:
     name: Build and attest
     runs-on: windows-latest
     timeout-minutes: 20
+    environment:
+      name: release
 
     permissions:
       contents: read
@@ -297,6 +299,7 @@ jobs:
         uses: SignPath/github-action-submit-signing-request@v2
         with:
           project-slug: wsl2compact
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }} 
           signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY }}
           github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
