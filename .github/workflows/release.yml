@@ -12,7 +12,11 @@ on:
     tags:
       - "v*"
 
-permissions: {}
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-${{ github.repository }}
@@ -26,7 +30,7 @@ jobs:
     environment:
       name: build
 
-    permissions:
+    :
       contents: read
       id-token: write
       attestations: write
@@ -293,8 +297,6 @@ jobs:
             wsl_compactor.ps1
 
       - name: Submit signing request to SignPath
-        env:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
         id: signpath
         uses: SignPath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
         with:
