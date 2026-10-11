@@ -12,11 +12,7 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: read
-  actions: read
-  id-token: write
-  attestations: write
+permissions: {}
 
 concurrency:
   group: release-${{ github.repository }}
