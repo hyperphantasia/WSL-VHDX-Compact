@@ -302,6 +302,7 @@ jobs:
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }} 
           signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY }}
           github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          connector-url: https://pipelineconnector.connectors.signpath.io/GitHub/GitHubCom
           wait-for-completion: true
           output-artifact-directory: signed
 
