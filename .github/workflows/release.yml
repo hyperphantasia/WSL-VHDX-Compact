@@ -280,24 +280,7 @@ jobs:
             "Built wsl2compact.exe ({0:N0} bytes / {1:N2} MB)" -f
             $size,
             ($size / 1MB)
-          )
-          
-      - name: Upload unsigned artifacts
-        id: upload-unsigned
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: unsigned-artifacts
-          if-no-files-found: error
-          retention-days: 1
-          path: |
-            wsl2compact.exe
-            wsl_compactor.ps1
-            
-      - name: Download unsigned artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: unsigned-artifacts
-          path: ./artifacts
+          ) 
       
       - name: Submit signing request to SignPath
         shell: pwsh
