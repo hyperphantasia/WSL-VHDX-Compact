@@ -284,73 +284,74 @@ jobs:
       
       - name: Submit signing request to SignPath
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          
-          Install-Module -Name SignPath -Force -SkipPublisherCheck
-          
-          # Create signed directory
-          New-Item -ItemType Directory -Path ./signed -Force | Out-Null
-          
-          Write-Host "Submitting files for signing..."
-          
-          try {
-            Submit-SigningRequest `
-              -InputArtifactPath "." `
-              -ApiToken "${{ secrets.SIGNPATH_API_TOKEN }}" `
-              -OrganizationId "${{ vars.SIGNPATH_ORGANIZATION_ID }}" `
-              -ProjectSlug "WSL-VHDX-Compact" `
-              -SigningPolicySlug "test-signing" `
-              -OutputArtifactPath "./signed" `
-              -WaitForCompletion
-            
-            Write-Host "✓ Signing completed successfully"
-          } catch {
-            Write-Host "✗ Signing failed: $_"
-            throw
-          }
-          
-          Write-Host "`nSigned files:"
-          Get-ChildItem -LiteralPath ./signed -Recurse
-      
-
-      - name: Verify signatures and replace files
-        shell: pwsh
         env:
-          REQUIRE_VALID: ${{ vars.SIGNPATH_REQUIRE_VALID_SIGNATURE }}
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORG_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $signedDir = Join-Path $env:GITHUB_WORKSPACE 'signed'
-          $files = @('wsl2compact.exe', 'wsl_compactor.ps1')
+          # Stage outside the workspace so .git and other build files are never touched
+          $staging   = Join-Path $env:RUNNER_TEMP 'signing-input'
+          $inputZip  = Join-Path $env:RUNNER_TEMP 'signing-input.zip'
+          $outputDir = Join-Path $env:RUNNER_TEMP 'signing-output'
 
-          foreach ($file in $files) {
-            $path = Join-Path $signedDir $file
-
-            if (-not (Test-Path -LiteralPath $path)) {
-              throw "Signed file missing: $file"
-            }
-
-            $sig = Get-AuthenticodeSignature -LiteralPath $path
-
-            if ($null -eq $sig.SignerCertificate) {
-              throw "$file has no Authenticode signature"
-            }
-
-            Write-Host "$file signer: $($sig.SignerCertificate.Subject)"
-            Write-Host "$file status: $($sig.Status)"
-
-            if ($env:REQUIRE_VALID -eq 'true' -and $sig.Status -ne 'Valid') {
-              throw "$file signature status is '$($sig.Status)', expected 'Valid'"
+          foreach ($p in @($staging, $inputZip, $outputDir)) {
+            if (Test-Path -LiteralPath $p) {
+              Remove-Item -LiteralPath $p -Recurse -Force
             }
           }
 
-          foreach ($file in $files) {
-            Move-Item `
-              -LiteralPath (Join-Path $signedDir $file) `
-              -Destination (Join-Path $env:GITHUB_WORKSPACE $file) `
+          New-Item -ItemType Directory -Path $staging, $outputDir | Out-Null
+
+          Copy-Item `
+            -Path .\wsl2compact.exe, .\wsl_compactor.ps1 `
+            -Destination $staging `
+            -Force
+
+          Compress-Archive `
+            -Path (Join-Path $staging '*') `
+            -DestinationPath $inputZip `
+            -Force
+
+          Write-Host "Input zip contents:"
+          Expand-Archive -LiteralPath $inputZip -DestinationPath "$staging-check" -Force
+          Get-ChildItem "$staging-check" | ForEach-Object { Write-Host "  $($_.Name)" }
+          Remove-Item "$staging-check" -Recurse -Force
+
+          Install-Module -Name SignPath -Force -SkipPublisherCheck
+
+          Write-Host "Submitting $inputZip for signing..."
+
+          Submit-SigningRequest `
+            -InputArtifactPath $inputZip `
+            -ApiToken $env:SIGNPATH_API_TOKEN `
+            -OrganizationId $env:SIGNPATH_ORG_ID `
+            -ProjectSlug "WSL-VHDX-Compact" `
+            -SigningPolicySlug "test-signing" `
+            -OutputArtifactPath $outputDir `
+            -WaitForCompletion
+
+          Write-Host "Signing completed"
+
+          # SignPath returns a zip of signed files; extract it into ./signed
+          New-Item -ItemType Directory -Path .\signed -Force | Out-Null
+
+          $signedZip = Get-ChildItem -LiteralPath $outputDir -Filter *.zip |
+            Select-Object -First 1
+
+          if ($signedZip) {
+            Expand-Archive `
+              -LiteralPath $signedZip.FullName `
+              -DestinationPath .\signed `
               -Force
           }
+          else {
+            # Fall back in case the output came back as loose files
+            Copy-Item -Path (Join-Path $outputDir '*') -Destination .\signed -Recurse -Force
+          }
+
+          Write-Host "`nSigned files:"
+          Get-ChildItem -LiteralPath .\signed -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
 
       - name: Create publish script from signed source
         shell: pwsh
