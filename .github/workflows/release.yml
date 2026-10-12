@@ -281,7 +281,6 @@ jobs:
             $size,
             ($size / 1MB)
           ) 
-      
       - name: Submit signing request to SignPath
         shell: pwsh
         env:
@@ -290,18 +289,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
-          # Stage outside the workspace so .git and other build files are never touched
-          $staging   = Join-Path $env:RUNNER_TEMP 'signing-input'
-          $inputZip  = Join-Path $env:RUNNER_TEMP 'signing-input.zip'
-          $outputDir = Join-Path $env:RUNNER_TEMP 'signing-output'
+          # Unique per run, so nothing left over from earlier runs can collide
+          $id        = "$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $staging   = Join-Path $env:RUNNER_TEMP "signing-input-$id"
+          $inputZip  = Join-Path $env:RUNNER_TEMP "signing-input-$id.zip"
+          $outputZip = Join-Path $env:RUNNER_TEMP "signing-output-$id.zip"
 
-          foreach ($p in @($staging, $inputZip, $outputDir)) {
-            if (Test-Path -LiteralPath $p) {
-              Remove-Item -LiteralPath $p -Recurse -Force
-            }
-          }
-
-          New-Item -ItemType Directory -Path $staging, $outputDir | Out-Null
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
           Copy-Item `
             -Path .\wsl2compact.exe, .\wsl_compactor.ps1 `
@@ -313,45 +307,34 @@ jobs:
             -DestinationPath $inputZip `
             -Force
 
-          Write-Host "Input zip contents:"
-          Expand-Archive -LiteralPath $inputZip -DestinationPath "$staging-check" -Force
-          Get-ChildItem "$staging-check" | ForEach-Object { Write-Host "  $($_.Name)" }
-          Remove-Item "$staging-check" -Recurse -Force
+          Write-Host "Input zip: $inputZip"
 
           Install-Module -Name SignPath -Force -SkipPublisherCheck
 
-          Write-Host "Submitting $inputZip for signing..."
-
+          # OutputArtifactPath is a zip file path, not a directory
           Submit-SigningRequest `
             -InputArtifactPath $inputZip `
             -ApiToken $env:SIGNPATH_API_TOKEN `
             -OrganizationId $env:SIGNPATH_ORG_ID `
             -ProjectSlug "WSL-VHDX-Compact" `
             -SigningPolicySlug "test-signing" `
-            -OutputArtifactPath $outputDir `
+            -OutputArtifactPath $outputZip `
             -WaitForCompletion
 
-          Write-Host "Signing completed"
+          if (-not (Test-Path -LiteralPath $outputZip)) {
+            throw "No signed zip was returned at $outputZip"
+          }
 
-          # SignPath returns a zip of signed files; extract it into ./signed
           New-Item -ItemType Directory -Path .\signed -Force | Out-Null
 
-          $signedZip = Get-ChildItem -LiteralPath $outputDir -Filter *.zip |
-            Select-Object -First 1
-
-          if ($signedZip) {
-            Expand-Archive `
-              -LiteralPath $signedZip.FullName `
-              -DestinationPath .\signed `
-              -Force
-          }
-          else {
-            # Fall back in case the output came back as loose files
-            Copy-Item -Path (Join-Path $outputDir '*') -Destination .\signed -Recurse -Force
-          }
+          Expand-Archive `
+            -LiteralPath $outputZip `
+            -DestinationPath .\signed `
+            -Force
 
           Write-Host "`nSigned files:"
-          Get-ChildItem -LiteralPath .\signed -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
+          Get-ChildItem -LiteralPath .\signed -Recurse |
+            ForEach-Object { Write-Host "  $($_.FullName)" }
 
       - name: Create publish script from signed source
         shell: pwsh
