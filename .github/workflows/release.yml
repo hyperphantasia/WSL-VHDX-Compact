@@ -298,20 +298,6 @@ jobs:
         with:
           name: unsigned-artifacts
           path: ./artifacts
-      
-      - name: Submit signing request to SignPath
-        shell: pwsh
-        run: |
-          Install-Module -Name SignPath -Force -SkipPublisherCheck
-          
-          Submit-SigningRequest `
-            -InputArtifactPath "./artifacts/wsl2compact.exe" `
-            -ApiToken "${{ secrets.SIGNPATH_API_TOKEN }}" `
-            -OrganizationId "${{ vars.SIGNPATH_ORGANIZATION_ID }}" `
-            -ProjectSlug "WSL-VHDX-Compact" `
-            -SigningPolicySlug "test-signing" `
-            -OutputArtifactPath "./signed" `
-            -WaitForCompletion
 
       - name: Submit signing request to SignPath
         shell: pwsh
