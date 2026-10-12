@@ -313,7 +313,7 @@ jobs:
           
           try {
             Submit-SigningRequest `
-              -InputArtifactPath "./artifacts" `
+              -InputArtifactPath "." `
               -ApiToken "${{ secrets.SIGNPATH_API_TOKEN }}" `
               -OrganizationId "${{ vars.SIGNPATH_ORGANIZATION_ID }}" `
               -ProjectSlug "WSL-VHDX-Compact" `
@@ -329,6 +329,7 @@ jobs:
           
           Write-Host "`nSigned files:"
           Get-ChildItem -LiteralPath ./signed -Recurse
+      
 
       - name: Verify signatures and replace files
         shell: pwsh
