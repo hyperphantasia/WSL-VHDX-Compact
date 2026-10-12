@@ -313,43 +313,44 @@ jobs:
             -OutputArtifactPath "./signed" `
             -WaitForCompletion
 
-      - name: Verify signatures and replace files
+      - name: Submit signing request to SignPath
         shell: pwsh
-        env:
-          REQUIRE_VALID: ${{ vars.SIGNPATH_REQUIRE_VALID_SIGNATURE }}
         run: |
           $ErrorActionPreference = 'Stop'
-
-          $signedDir = Join-Path $env:GITHUB_WORKSPACE 'signed'
+          
+          Install-Module -Name SignPath -Force -SkipPublisherCheck
+          
+          # Create signed directory first
+          New-Item -ItemType Directory -Path ./signed -Force | Out-Null
+          
           $files = @('wsl2compact.exe', 'wsl_compactor.ps1')
-
+          
           foreach ($file in $files) {
-            $path = Join-Path $signedDir $file
-
-            if (-not (Test-Path -LiteralPath $path)) {
-              throw "Signed file missing: $file"
-            }
-
-            $sig = Get-AuthenticodeSignature -LiteralPath $path
-
-            if ($null -eq $sig.SignerCertificate) {
-              throw "$file has no Authenticode signature"
-            }
-
-            Write-Host "$file signer: $($sig.SignerCertificate.Subject)"
-            Write-Host "$file status: $($sig.Status)"
-
-            if ($env:REQUIRE_VALID -eq 'true' -and $sig.Status -ne 'Valid') {
-              throw "$file signature status is '$($sig.Status)', expected 'Valid'"
+            $inputPath = "./artifacts/$file"
+            $outputPath = "./signed/$file"
+            
+            Write-Host "Submitting $file for signing..."
+            
+            try {
+              Submit-SigningRequest `
+                -InputArtifactPath $inputPath `
+                -ApiToken "${{ secrets.SIGNPATH_API_TOKEN }}" `
+                -OrganizationId "${{ vars.SIGNPATH_ORGANIZATION_ID }}" `
+                -ProjectSlug "WSL-VHDX-Compact" `
+                -SigningPolicySlug "test-signing" `
+                -OutputArtifactPath $outputPath `
+                -WaitForCompletion
+              
+              Write-Host "✓ $file signed successfully"
+            } catch {
+              Write-Host "✗ Failed to sign $file"
+              Write-Host "Error: $_"
+              throw
             }
           }
-
-          foreach ($file in $files) {
-            Move-Item `
-              -LiteralPath (Join-Path $signedDir $file) `
-              -Destination (Join-Path $env:GITHUB_WORKSPACE $file) `
-              -Force
-          }
+          
+          Write-Host "`nSigned files:"
+          Get-ChildItem -LiteralPath ./signed
 
       - name: Create publish script from signed source
         shell: pwsh
