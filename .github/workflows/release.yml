@@ -292,19 +292,20 @@ jobs:
           path: |
             wsl2compact.exe
             wsl_compactor.ps1
-
+            
       - name: Submit signing request to SignPath
-        id: signpath
-        uses: SignPath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          project-slug: WSL-VHDX-Compact
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }} 
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY }}
-          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
-          connector-url: https://pipelineconnector.connectors.signpath.io/GitHub/GitHubCom
-          wait-for-completion: true
-          output-artifact-directory: signed
+        shell: pwsh
+        run: |
+          Install-Module -Name SignPath -Force -SkipPublisherCheck
+          
+          Submit-SigningRequest `
+            -InputArtifactPath "${{ steps.upload-unsigned.outputs.artifact-path }}" `
+            -ApiToken "${{ secrets.SIGNPATH_API_TOKEN }}" `
+            -OrganizationId "${{ vars.SIGNPATH_ORGANIZATION_ID }}" `
+            -ProjectSlug "WSL-VHDX-Compact" `
+            -SigningPolicySlug "${{ vars.SIGNPATH_SIGNING_POLICY }}" `
+            -OutputArtifactPath "signed" `
+            -WaitForCompletion
 
       - name: Verify signatures and replace files
         shell: pwsh
