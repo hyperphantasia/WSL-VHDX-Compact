@@ -117,7 +117,7 @@ jobs:
         timeout-minutes: 15
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-          SIGNPATH_ORG_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_ORG_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
         run: ./.github/scripts/Build.ps1 -Task Sign
 
       - name: Generate checksums
