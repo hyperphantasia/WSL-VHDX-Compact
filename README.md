@@ -92,11 +92,11 @@ To run the script, follow these steps:
 
 1. Download or clone this repository.
 2. Open Command Prompt or PowerShell **as an administrator**.
-3. Navigate to the directory containing the `wsl_compactor.ps1` file.
+3. Navigate to the directory containing the `wsl2compact.ps1` file.
 4. Execute the script with the following  command:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\wsl_compactor.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\wsl2compact.ps1
 ```
 
 Non-interactive mode:
@@ -111,7 +111,7 @@ wsl.exe --list
 When `-DistroName` or `-All` are supplied, the script runs without confirmation prompt. Example with an Ubuntu distro:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\wsl_compactor.ps1 -DistroName Ubuntu
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\wsl2compact.ps1 -DistroName Ubuntu
 ```
 
 ### The executable
@@ -192,7 +192,7 @@ This project is not yet code-signed. I've applied for a free certificate. This s
 > `wsl2compact.exe` is built with [PS2EXE](https://github.com/MScholtes/PS2EXE) from the `.ps1` script in this repo. Nothing more.
 > A small number of antivirus engines occasionally flag freshly-built, unsigned Windows executables as suspicious based on heuristics *rather than actual content*. This is a [well-documented](https://github.com/MScholtes/PS2EXE/issues/153) **false-positive** [pattern](https://stackoverflow.com/questions/70393526/how-do-i-compile-a-powershell-script-so-that-it-is-shown-as-safe-by-antivirus) for small open-source tools that is not unique to this project.
 
-Since you will be prompted to run a powershell script with elevated rights, be rigorous: read below how to check the contents of the `.exe` by yourself. If you'd rather avoid it entirely, use the PowerShell Gallery install method above, or read and run `wsl_compactor.ps1` directly: it's plain, unobfuscated PowerShell.
+Since you will be prompted to run a powershell script with elevated rights, be rigorous: read below how to check the contents of the `.exe` by yourself. If you'd rather avoid it entirely, use the PowerShell Gallery install method above, or read and run `wsl2compact.ps1` directly: it's plain, unobfuscated PowerShell.
 
 After installing PS2Exe like this:
 
@@ -209,7 +209,7 @@ Invoke-PS2EXE -extract .\wsl2compact.exe -OutPath .\extracted
 
 And then inspect its content :)
 
-The only difference with [wsl_compactor.ps1](https://github.com/hyperphantasia/WSL-VHDX-Compact/blob/main/wsl_compactor.ps1) script should be the two lines bottom lines appended during packaging stage by the [`release.yml`](https://github.com/hyperphantasia/WSL-VHDX-Compact/blob/main/.github/workflows/release.yml) file (this maintains the terminal screen active and exit only on user input).
+The only difference with [wsl2compact.ps1](https://github.com/hyperphantasia/WSL-VHDX-Compact/blob/main/wsl2compact.ps1) script should be the two lines bottom lines appended during packaging stage by the [`release.yml`](https://github.com/hyperphantasia/WSL-VHDX-Compact/blob/main/.github/workflows/release.yml) file (this maintains the terminal screen active and exit only on user input).
 
 ```powershell
 Write-Host "`nPress any key to exit..." -ForegroundColor DarkCyan

@@ -18,63 +18,60 @@ concurrency:
   group: release-${{ github.repository }}
   cancel-in-progress: false
 
+defaults:
+  run:
+    shell: pwsh # runs with $ErrorActionPreference = 'stop' prepended
+
+env:
+  # Base name of the script, the EXE and the PowerShell Gallery package:
+  # wsl2compact.ps1 / wsl2compact.exe. Publish-Script derives the package name
+  # from the file name, so the script in the repo must carry this name.
+  APP_NAME: wsl2compact
+  # Directory that holds exactly what gets attested, verified and released.
+  DIST_DIR: dist
+  PS2EXE_VERSION: "1.0.18"
+  SIGNPATH_MODULE_VERSION: "4.4.6"
+  SIGNPATH_PROJECT_SLUG: WSL-VHDX-Compact
+  SIGNPATH_POLICY_SLUG: test-signing
+  # 'false' only while using the test-signing policy (untrusted test
+  # certificate). Set to 'true' when switching to the release-signing policy.
+  REQUIRE_TRUSTED_SIGNATURE: "false"
+
 jobs:
   build:
-    name: Build and attest
-    runs-on: windows-latest
-    timeout-minutes: 20
+    name: Build, sign and attest
+    runs-on: windows-2025
+    timeout-minutes: 25
+    # Secrets/variables used here live in this environment, not at repo level:
+    #   secret SIGNPATH_API_TOKEN, variable SIGNPATH_ORGANIZATION_ID
+    environment:
+      name: build
 
     permissions:
-      contents: read
-      id-token: write
-      attestations: write
+      contents: read # checkout
+      id-token: write # OIDC token for the attestation
+      attestations: write # store the attestation
 
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
 
     steps:
-      - name: Enforce trusted ref for manual runs
-        shell: pwsh
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          # Tag pushes are always fine; they already imply a specific
-          # immutable commit. Manual dispatch runs, on the other hand,
-          # can be launched from any branch by anyone with write access,
-          # so restrict those to the default branch only.
-          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
-            $allowedBranch = 'main'
-
-            if (-not (
-              $env:REF_TYPE -eq 'branch' -and
-              $env:REF_NAME -eq $allowedBranch
-            )) {
-              throw (
-                "workflow_dispatch releases are only allowed from " +
-                "the '$allowedBranch' branch. Triggered from " +
-                "ref_type='$env:REF_TYPE', ref_name='$env:REF_NAME'."
-              )
-            }
-          }
-
-          Write-Host "Ref check passed for event '$env:EVENT_NAME'"
-
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Environment info
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
+      - name: Enforce trusted ref for manual runs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: ./.github/scripts/Build.ps1 -Task AssertRef
 
+      - name: Environment info
+        run: |
           Write-Host "::group::Environment"
           Write-Host ("PowerShell   : {0}" -f $PSVersionTable.PSVersion)
           Write-Host ("OS           : {0}" -f [Environment]::OSVersion.VersionString)
@@ -83,248 +80,53 @@ jobs:
 
       - name: Compute version
         id: version
-        shell: pwsh
         env:
           INPUT_VERSION: ${{ inputs.version }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
-        run: |
-          $ErrorActionPreference = 'Stop'
+        run: ./.github/scripts/Build.ps1 -Task ComputeVersion
 
-          if ($env:REF_TYPE -eq 'tag') {
-            $tag = $env:REF_NAME
+      - name: Preflight (nothing may exist yet)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: ./.github/scripts/Build.ps1 -Task Preflight
 
-            if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
-              throw "Expected a tag such as v1.2.3, got '$tag'"
-            }
-
-            $version = $tag.Substring(1)
-          }
-          else {
-            $version = $env:INPUT_VERSION
-
-            if ($version -notmatch '^\d+\.\d+\.\d+$') {
-              throw "Expected a semantic version such as 1.2.3, got '$version'"
-            }
-
-            $tag = "v$version"
-          }
-
-          "version=$version" | Out-File `
-            -FilePath $env:GITHUB_OUTPUT `
-            -Append `
-            -Encoding utf8
-
-          "tag=$tag" | Out-File `
-            -FilePath $env:GITHUB_OUTPUT `
-            -Append `
-            -Encoding utf8
-
-          Write-Host "Release version: $version"
-          Write-Host "Release tag:     $tag"
-
-      - name: Stamp script version
-        shell: pwsh
+      - name: Stamp and validate script version
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $path = Join-Path `
-            $env:GITHUB_WORKSPACE `
-            'wsl_compactor.ps1'
-
-          $text = Get-Content `
-            -LiteralPath $path `
-            -Raw
-
-          $pattern = '(?m)^\.VERSION\s+.*$'
-
-          if (-not [regex]::IsMatch($text, $pattern)) {
-            throw "No .VERSION directive found in $path"
-          }
-
-          $text = [regex]::Replace(
-            $text,
-            $pattern,
-            ".VERSION $env:VERSION",
-            1
-          )
-
-          [IO.File]::WriteAllText(
-            $path,
-            $text,
-            [Text.UTF8Encoding]::new($false)
-          )
-
-      - name: Validate script metadata
-        shell: pwsh
-        env:
-          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $info = Test-ScriptFileInfo `
-            -Path .\wsl_compactor.ps1
-
-          if ($info.Version.ToString() -ne $env:EXPECTED_VERSION) {
-            throw (
-              "Script version mismatch. Expected {0}, found {1}" -f
-              $env:EXPECTED_VERSION,
-              $info.Version
-            )
-          }
-
-          if ([string]::IsNullOrWhiteSpace($info.Name)) {
-            throw "Script metadata has no name"
-          }
-
-          if ([string]::IsNullOrWhiteSpace($info.Description)) {
-            throw "Script metadata has no description"
-          }
-
-          Write-Host "Validated script metadata"
-          Write-Host "Name:        $($info.Name)"
-          Write-Host "Version:     $($info.Version)"
-          Write-Host "Description: $($info.Description)"
-
-      - name: Copy publish script
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          Copy-Item `
-            -LiteralPath .\wsl_compactor.ps1 `
-            -Destination .\wsl2compact.ps1 `
-            -Force
+        run: ./.github/scripts/Build.ps1 -Task StampVersion
 
       - name: Install reviewed ps2exe version
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $requiredVersion = '1.0.18'
-
-          $repository = Get-PSRepository `
-            -Name PSGallery `
-            -ErrorAction Stop
-
-          if ($repository.InstallationPolicy -ne 'Trusted') {
-            Set-PSRepository `
-              -Name PSGallery `
-              -InstallationPolicy Trusted
-          }
-
-          Install-Module `
-            -Name ps2exe `
-            -RequiredVersion $requiredVersion `
-            -Scope CurrentUser `
-            -Force `
-            -ErrorAction Stop
-
-          $module = Get-Module ps2exe -ListAvailable |
-            Where-Object {
-              $_.Version.ToString() -eq $requiredVersion
-            } |
-            Sort-Object Version -Descending |
-            Select-Object -First 1
-
-          if (-not $module) {
-            throw "Expected ps2exe $requiredVersion was not installed"
-          }
-
-          Write-Host "Using ps2exe $($module.Version)"
-          Write-Host "Module path: $($module.ModuleBase)"
-
-      - name: Prepare EXE source
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          Copy-Item `
-            -LiteralPath .\wsl_compactor.ps1 `
-            -Destination .\wsl2compact-console.ps1 `
-            -Force
-
-          $content = @'
-
-          if (-not $nonInteractive) {
-              Write-Host "`nPress any key to exit..." -ForegroundColor DarkCyan
-              $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-          }
-          '@
-
-          Add-Content `
-            -LiteralPath .\wsl2compact-console.ps1 `
-            -Encoding utf8 `
-            -Value $content
+        run: ./.github/scripts/Build.ps1 -Task InstallPs2exe
 
       - name: Build EXE
-        shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          $ErrorActionPreference = 'Stop'
+        run: ./.github/scripts/Build.ps1 -Task BuildExe
 
-          Invoke-ps2exe `
-            -inputFile    .\wsl2compact-console.ps1 `
-            -outputFile   .\wsl2compact.exe `
-            -version      $env:VERSION `
-            -title        "WSL VHDX Compactor" `
-            -description  "Compacts WSL2 distro VHDX files to reclaim disk space" `
-            -company      "hyperphantasia" `
-            -product      "wsl2compact" `
-            -copyright    "(c) $(Get-Date -Format yyyy) hyperphantasia" `
-            -requireAdmin
+      - name: Install reviewed SignPath module version
+        run: ./.github/scripts/Build.ps1 -Task InstallSignPath
 
-          if (-not (Test-Path -LiteralPath .\wsl2compact.exe)) {
-            throw "The EXE was not created"
-          }
-
-          $size = (Get-Item .\wsl2compact.exe).Length
-
-          Write-Host (
-            "Built wsl2compact.exe ({0:N0} bytes / {1:N2} MB)" -f
-            $size,
-            ($size / 1MB)
-          )
+      # Waits on an external service, so it gets its own timeout. A
+      # release-signing policy with manual approval needs a much larger value.
+      - name: Sign with SignPath (signed files land in dist/)
+        timeout-minutes: 15
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORG_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+        run: ./.github/scripts/Build.ps1 -Task Sign
 
       - name: Generate checksums
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $files = @(
-            'wsl_compactor.ps1',
-            'wsl2compact.exe'
-          )
-
-          $lines = foreach ($file in $files) {
-            if (-not (Test-Path -LiteralPath $file)) {
-              throw "Missing expected artifact: $file"
-            }
-
-            $hash = Get-FileHash `
-              -LiteralPath $file `
-              -Algorithm SHA256
-
-            "{0}  {1}" -f $hash.Hash.ToLowerInvariant(), $file
-          }
-
-          $lines | Set-Content `
-            -LiteralPath checksums.txt `
-            -Encoding ascii
-
-          Write-Host "::group::SHA256 checksums"
-          $lines | ForEach-Object { Write-Host $_ }
-          Write-Host "::endgroup::"
+        run: ./.github/scripts/Build.ps1 -Task Checksums
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: |
-            wsl2compact.exe
-            wsl_compactor.ps1
+          subject-checksums: ${{ env.DIST_DIR }}/checksums.txt
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -332,207 +134,70 @@ jobs:
           name: release-artifacts
           if-no-files-found: error
           retention-days: 7
-          path: |
-            wsl_compactor.ps1
-            wsl2compact.ps1
-            wsl2compact.exe
-            checksums.txt
-
+          path: ${{ env.DIST_DIR }}/
 
   publish:
     name: Publish packages and GitHub Release
     needs: build
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 15
-
+    # Secret PSGALLERY_API_KEY lives in this environment, not at repo level.
     environment:
       name: release
 
     permissions:
-      contents: write
+      contents: write # create the release
+      attestations: read # fetch attestations for gh attestation verify
+
+    env:
+      # gh needs no git checkout when the repository is given explicitly.
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
 
     steps:
-      - name: Check out triggering ref
+      # Only the helper scripts, from the exact commit that was built (never a
+      # moving branch). The source tree itself is not needed here.
+      - name: Check out helper scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref }}
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/scripts
+          fetch-depth: 1
           persist-credentials: false
 
       - name: Download release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-artifacts
-          path: .
+          path: ${{ env.DIST_DIR }}
 
-      - name: Verify downloaded artifacts
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
+      - name: Verify checksums
+        run: ./.github/scripts/Publish.ps1 -Task VerifyChecksums
 
-          $files = @(
-            'wsl_compactor.ps1',
-            'wsl2compact.ps1',
-            'wsl2compact.exe',
-            'checksums.txt'
-          )
-
-          foreach ($file in $files) {
-            if (-not (Test-Path -LiteralPath $file)) {
-              throw "Missing downloaded artifact: $file"
-            }
-          }
-
-          $checksums = Get-Content -LiteralPath .\checksums.txt
-
-          foreach ($file in @(
-            'wsl_compactor.ps1',
-            'wsl2compact.exe'
-          )) {
-            $actual = (
-              Get-FileHash `
-                -LiteralPath $file `
-                -Algorithm SHA256
-            ).Hash.ToLowerInvariant()
-
-            $line = $checksums |
-              Where-Object { $_ -match ("\s+" + [regex]::Escape($file) + '$') } |
-              Select-Object -First 1
-
-            if (-not $line) {
-              throw "No checksum entry found for $file"
-            }
-
-            $expected = $line.Split()[0].ToLowerInvariant()
-
-            if ($actual -ne $expected) {
-              throw "Checksum verification failed for $file"
-            }
-          }
-
-          if (
-            (Get-FileHash .\wsl_compactor.ps1 -Algorithm SHA256).Hash `
-            -ne
-            (Get-FileHash .\wsl2compact.ps1 -Algorithm SHA256).Hash
-          ) {
-            throw "wsl2compact.ps1 differs from wsl_compactor.ps1"
-          }
-
-          Write-Host "All downloaded artifacts passed verification"
-
+      - name: Verify build provenance
+        run: ./.github/scripts/Publish.ps1 -Task VerifyAttestation
 
       - name: Publish to PowerShell Gallery
-        shell: pwsh
+        id: gallery
         env:
           NUGET_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
-          RELEASE_VERSION: ${{ needs.build.outputs.version }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          if ([string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) {
-            throw "PSGALLERY_API_KEY is not configured"
-          }
-
-          Publish-Script `
-            -Path .\wsl2compact.ps1 `
-            -NuGetApiKey $env:NUGET_API_KEY `
-            -Repository PSGallery `
-            -ErrorAction Stop
-
-          Write-Host (
-            "Published wsl2compact v{0} to PowerShell Gallery" -f
-            $env:RELEASE_VERSION
-          )
+        run: ./.github/scripts/Publish.ps1 -Task PublishGallery
 
       - name: Create GitHub Release
-        shell: pwsh
+        id: release
         env:
-          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
           REF_TYPE: ${{ github.ref_type }}
           RELEASE_SHA: ${{ github.sha }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $arguments = @(
-            'release',
-            'create',
-            $env:RELEASE_TAG,
-            '.\wsl2compact.exe',
-            '.\wsl_compactor.ps1',
-            '.\checksums.txt',
-            '--title',
-            "v$env:RELEASE_VERSION",
-            '--generate-notes'
-          )
-
-          if ($env:REF_TYPE -eq 'tag') {
-            $arguments += '--verify-tag'
-          }
-          else {
-            $arguments += @(
-              '--target',
-              $env:RELEASE_SHA
-            )
-          }
-
-          & gh @arguments
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "gh release create failed with exit code $LASTEXITCODE"
-          }
-
-          Write-Host "Release created: $env:RELEASE_TAG"
+        run: ./.github/scripts/Publish.ps1 -Task CreateRelease
 
       - name: Job summary
         if: always()
-        shell: pwsh
         env:
+          JOB_STATUS: ${{ job.status }}
+          GALLERY_OUTCOME: ${{ steps.gallery.outcome }}
+          RELEASE_OUTCOME: ${{ steps.release.outcome }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
           RELEASE_TAG: ${{ needs.build.outputs.tag }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          $ps1Hash = if (Test-Path .\wsl_compactor.ps1) {
-            (Get-FileHash `
-              -LiteralPath .\wsl_compactor.ps1 `
-              -Algorithm SHA256).Hash
-          }
-          else {
-            'n/a'
-          }
-
-          $exeHash = if (Test-Path .\wsl2compact.exe) {
-            (Get-FileHash `
-              -LiteralPath .\wsl2compact.exe `
-              -Algorithm SHA256).Hash
-          }
-          else {
-            'n/a'
-          }
-
-          $exeSize = if (Test-Path .\wsl2compact.exe) {
-            "{0:N2} MB" -f (
-              (Get-Item .\wsl2compact.exe).Length / 1MB
-            )
-          }
-          else {
-            'n/a'
-          }
-
-          @(
-            '## Release summary'
-            ''
-            '| Item | Value |'
-            '|---|---|'
-            "| Version | ``$env:RELEASE_VERSION`` |"
-            '| PowerShell Gallery | Published as ``wsl2compact`` |'
-            "| wsl_compactor.ps1 SHA256 | ``$ps1Hash`` |"
-            "| wsl2compact.exe SHA256 | ``$exeHash`` |"
-            "| wsl2compact.exe size | $exeSize |"
-            "| Release | https://github.com/$env:REPOSITORY/releases/tag/$env:RELEASE_TAG |"
-          ) -join "`n" |
-            Out-File `
-              -FilePath $env:GITHUB_STEP_SUMMARY `
-              -Encoding utf8 `
-              -Append
+        run: ./.github/scripts/Publish.ps1 -Task Summary

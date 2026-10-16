@@ -1,4 +1,4 @@
-param([string]$SourcePath = (Join-Path $PSScriptRoot '..\wsl_compactor.ps1'))
+param([string]$SourcePath = (Join-Path $PSScriptRoot '..\wsl2compact.ps1'))
 
 $ErrorActionPreference = 'Stop'
 $SourcePath = (Resolve-Path -LiteralPath $SourcePath).ProviderPath
