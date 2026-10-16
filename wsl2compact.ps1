@@ -46,10 +46,10 @@ prompt.
 In an elevated terminal.
 
   Interactive:
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\wsl_compactor.ps1
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\wsl2compact.ps1
 
   Non-interactive:
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\wsl_compactor.ps1 -DistroName Ubuntu
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\wsl2compact.ps1 -DistroName Ubuntu
 #>
 
 [CmdletBinding()]
