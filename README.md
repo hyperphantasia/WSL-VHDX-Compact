@@ -38,10 +38,13 @@ This PowerShell script automates the process of compacting WSL2 `ext4.vhdx` file
   - [Algorithm](#algorithm)
   - [Notes](#notes)
     - [Exit codes & errors](#exit-codes--errors)
+    - [Testing](#testing)
     - [Misc](#misc)
   - [Compatibility](#compatibility)
   - [Changelog](#changelog)
-    - [July 2026 - Latest](#july-2026---latest)
+    - [October 2026 - Latest](#october-2026---latest)
+    - [September 2026](#september-2026)
+    - [July 2026](#july-2026)
     - [May 2026](#may-2026)
     - [April & May 2026](#april--may-2026)
     - [August 2025](#august-2025)
@@ -207,14 +210,7 @@ Import-Module ps2exe
 Invoke-PS2EXE -extract .\wsl2compact.exe -OutPath .\extracted
 ```
 
-And then inspect its content :)
-
-The only difference with [wsl2compact.ps1](https://github.com/hyperphantasia/WSL-VHDX-Compact/blob/main/wsl2compact.ps1) script should be the two lines bottom lines appended during packaging stage by the [`release.yml`](https://github.com/hyperphantasia/WSL-VHDX-Compact/blob/main/.github/workflows/release.yml) file (this maintains the terminal screen active and exit only on user input).
-
-```powershell
-Write-Host "`nPress any key to exit..." -ForegroundColor DarkCyan
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-```
+And then inspect and compare its content with the one available in this repo :)
 
 ## Algorithm
 
@@ -235,11 +231,7 @@ The script performs the following actions:
 
 - The script throws errors on missing admin rights, missing registry entries, missing ext4.vhdx file, or failed WSL shutdown.
 - When `fstrim` fails it logs a warning and continues.
-- A failed DiskPart compaction is reported for that distro without marking it
-  optimized. The remaining distros are still processed, and every result is
-  included in the summary. After the summary, any failed compaction raises an
-  aggregate error (`powershell.exe -File` exits with code 1); all-success runs
-  exit with code 0. DiskPart's native exit code is checked, not localized text.
+- A failed DiskPart compaction is reported for that distro without marking it optimized. The remaining distros are still processed, and every result is included in the summary.
 
 ### Testing
 
@@ -249,14 +241,8 @@ Run the regression tests from the repository root in Windows PowerShell 5.1:
 powershell.exe -NoProfile -File .\tests\Test-Compaction.ps1
 ```
 
-No administrator rights or additional modules are needed. The tests execute
-the script's compaction loop and summary in isolated PowerShell processes,
-substitute DiskPart and Optimize-VHD, and use only disposable text files. They
-never enumerate distros, trim disks, shut down WSL, or compact a real VHDX.
-They verify native process exit handling, per-distro results, continuation,
-fallback and temporary-script cleanup, not physical VHD attachment or space
-reclamation. Small synthetic diagnostic files are retained at the printed
-temporary path.
+No administrator rights or additional modules are needed. The tests execute the script's compaction loop and summary in isolated PowerShell processes, substitute DiskPart and Optimize-VHD, and use only disposable text files.
+Small synthetic diagnostic files are retained at the printed temporary path.
 
 ### Misc
 
@@ -274,10 +260,16 @@ This script is compatible with Windows systems that have WSL2 installed. It has 
 
 ## Changelog
 
-### September 2026 - Latest
+### October 2026 - Latest
+
+- **DevSecOps**: refactored the CI/CD pipeline & implemented [SignPath](https://signpath.org/) *signing*.
+- **Fixes**: `Wait-ForKey` now pauses in two cases and it never waits when nobody cannot press a key.
+- **Fixes**: handles the `fstrim` [warning](https://github.com/microsoft/WSL/issues/13848) when selecting several distros.
+
+### September 2026
 
 - **DevSecOps**: hardened the CI/CD pipeline.
-- **Bugfixes**: robust no-op check and added tests [PR#12](https://github.com/hyperphantasia/WSL-VHDX-Compact/pull/12) by jon4v
+- **Bugfixes**: robust no-op check and added tests [PR#12](https://github.com/hyperphantasia/WSL-VHDX-Compact/pull/12) by @jon4v
 
 ### July 2026
 
