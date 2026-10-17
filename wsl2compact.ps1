@@ -58,6 +58,52 @@ param(
   [switch]$All
 )
 
+# True for -All / -DistroName (no prompts, so no pause at the end either)
+$nonInteractive = [bool]($All -or $DistroName)
+
+function Test-OwnsConsole {
+  # True when this process is the ONLY process attached to its console window,
+  # i.e. Windows created the window just for us (double-click / "Run with
+  # PowerShell" from Explorer) and it will vanish when we exit. When started
+  # from a terminal, the parent shell is attached too (count >= 2).
+  try {
+    if (-not ('WslCompact.NativeConsole' -as [type])) {
+      Add-Type -Namespace WslCompact -Name NativeConsole -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+public static extern uint GetConsoleProcessList(uint[] processList, uint processCount);
+'@
+    }
+    $buffer = New-Object 'uint32[]' 2
+    return ([WslCompact.NativeConsole]::GetConsoleProcessList($buffer, $buffer.Length) -eq 1)
+  }
+  catch {
+    return $false   # can't tell -> don't pause
+  }
+}
+
+function Wait-ForKey {
+  # Never wait when there is nobody to press a key (-All / -DistroName,
+  # scheduled tasks, redirected input).
+  if ($nonInteractive -or [Console]::IsInputRedirected) { return }
+
+  # 1) ps2exe-compiled EXE. Its host reports itself as 'PSRunspace-Host'
+  # 2) Plain .ps1 started from Explorer: the console window closes on exit.
+  $pause = ($Host.Name -eq 'PSRunspace-Host') -or
+           ($Host.Name -eq 'ConsoleHost' -and (Test-OwnsConsole))
+
+  if ($pause) {
+    Write-Host "`nPress any key to exit..." -ForegroundColor DarkCyan
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+  }
+}
+
+# Any terminating error (throw): show it, pause when compiled, exit non-zero
+trap {
+  Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+  Wait-ForKey
+  exit 1
+}
+
 #------------------------------------------------------------
 # Step 0 - Admin check
 #------------------------------------------------------------
@@ -99,11 +145,8 @@ if ($distros.Count -eq 0) {
 #   no args, 1 distro -> that distro, still confirms
 #   no args, >1 distro -> menu, pick a number OR "A" for all
 #------------------------------------------------------------
-$nonInteractive = $false
-
 if ($All) {
-  $selectedList   = @($distros)
-  $nonInteractive = $true
+  $selectedList = @($distros)
 }
 elseif ($DistroName) {
   $selectedList = foreach ($name in $DistroName) {
@@ -114,7 +157,6 @@ elseif ($DistroName) {
     }
     $match
   }
-  $nonInteractive = $true
 }
 elseif ($distros.Count -gt 1) {
   Write-Host "Multiple distros detected. Please choose which one(s) to compact:`n" -ForegroundColor Cyan
@@ -205,6 +247,7 @@ if (-not $nonInteractive) {
   $answer = Read-Host
   if ($answer.ToUpper() -ne 'Y') {
     Write-Warning "Operation canceled."
+    Wait-ForKey
     exit
   }
 }
@@ -215,9 +258,25 @@ else {
 #------------------------------------------------------------
 # Step 4 - Optional fstrim (per distro, while each is still running)
 #------------------------------------------------------------
+# WSL 2.6.x prints "Failed to start the systemd user session" when it starts a
+# distro while another is already running. It comes from wsl.exe,
+# so it is shown as a short note instead of an ERROR.
+$wslSessionNoise = 'Failed to start the systemd user session'
+
 foreach ($j in $jobs) {
   Write-Host "`nPreparation: logical cleanup with fstrim to discard unused blocks on '$($j.Name)'..." -ForegroundColor Cyan
-  & wsl.exe -d "$($j.Name)" -u root -- fstrim -av
+
+  & wsl.exe -d "$($j.Name)" -u root -- fstrim -av 2>&1 | ForEach-Object {
+    # wsl.exe's own messages can arrive UTF-16 encoded; strip the NULs first
+    $line = ("$_" -replace "`0", '').TrimEnd()
+    if ($line -match $wslSessionNoise) {
+      Write-Host "  (note: ignored a WSL systemd user-session warning; fstrim is unaffected)" -ForegroundColor DarkGray
+    }
+    elseif ($line) {
+      Write-Host $line
+    }
+  }
+
   if ($LASTEXITCODE -ne 0) {
     Write-Warning "fstrim returned a non-zero exit code for '$($j.Name)'. Continuing anyway."
   }
@@ -280,8 +339,8 @@ exit
 
     try {
       & diskpart /s $tempFile | ForEach-Object {
-          if ($_ -match '(\d+)\s+percent') {
-              $pct = [int]$Matches[1]
+        if ($_ -match '(\d+)\s+percent') {
+          $pct = [int]$Matches[1]
           if ($pct -ne $lastPct) {
             Write-Host "$pct% completed"
             $lastPct = $pct
@@ -346,3 +405,5 @@ if ($jobs | Where-Object { -not $_.Optimized }) {
 else {
   Write-Host "`nDone." -ForegroundColor Green
 }
+
+Wait-ForKey
