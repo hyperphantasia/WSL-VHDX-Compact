@@ -10,18 +10,20 @@
     Preflight        VERSION, TAG, REF_TYPE, APP_NAME, GITHUB_REPOSITORY, GH_TOKEN
     StampVersion     VERSION, APP_NAME
     InstallPs2exe    PS2EXE_VERSION
-    InstallSignPath  SIGNPATH_MODULE_VERSION
     BuildExe         VERSION, APP_NAME
-    Sign             APP_NAME, DIST_DIR, SIGNPATH_API_TOKEN, SIGNPATH_ORG_ID,
-                     SIGNPATH_PROJECT_SLUG, SIGNPATH_POLICY_SLUG,
-                     REQUIRE_TRUSTED_SIGNATURE
+    StageUnsigned    APP_NAME, UNSIGNED_DIR
+    PromoteSigned    APP_NAME, SIGNED_DIR, DIST_DIR, REQUIRE_TRUSTED_SIGNATURE
     Checksums        DIST_DIR
+
+    Signing itself is done by the signpath/github-action-submit-signing-request
+    action between StageUnsigned and PromoteSigned, so that SignPath fetches
+    the artifact from the workflow run and can verify its origin.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [ValidateSet('AssertRef', 'ComputeVersion', 'Preflight', 'StampVersion',
-        'InstallPs2exe', 'InstallSignPath', 'BuildExe', 'Sign', 'Checksums')]
+        'InstallPs2exe', 'BuildExe', 'StageUnsigned', 'PromoteSigned', 'Checksums')]
     [string]$Task
 )
 
@@ -167,10 +169,6 @@ function Invoke-InstallPs2exe {
     Install-PinnedModule -Name ps2exe -Version (Get-Setting PS2EXE_VERSION)
 }
 
-function Invoke-InstallSignPath {
-    Install-PinnedModule -Name SignPath -Version (Get-Setting SIGNPATH_MODULE_VERSION)
-}
-
 function Invoke-BuildExe {
     $app = Get-Setting APP_NAME
     $exe = "$app.exe"
@@ -195,6 +193,28 @@ function Invoke-BuildExe {
     Write-Host ('Built {0} ({1:N0} bytes / {2:N2} MB)' -f $exe, $size, ($size / 1MB))
 }
 
+function Invoke-StageUnsigned {
+    # Copies the built files into UNSIGNED_DIR. The workflow uploads this folder
+    # with actions/upload-artifact (both files end up at the root of the zip),
+    # and SignPath then fetches that artifact from the workflow run and
+    # verifies its origin. The SignPath artifact configuration must sign both
+    # files at the root of the zip.
+    $app = Get-Setting APP_NAME
+    $staging = Get-Setting UNSIGNED_DIR
+
+    New-Item -ItemType Directory -Path $staging -Force | Out-Null
+    foreach ($file in "$app.ps1", "$app.exe") {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+            throw "Cannot stage missing file: $file"
+        }
+        Copy-Item -LiteralPath $file -Destination $staging -Force
+    }
+
+    foreach ($item in Get-ChildItem -LiteralPath $staging -File | Sort-Object Name) {
+        Write-Host ('Staged {0} ({1:N0} bytes)' -f $item.Name, $item.Length)
+    }
+}
+
 function Assert-Signature {
     param([Parameter(Mandatory)][string]$File, [Parameter(Mandatory)][bool]$RequireTrusted)
 
@@ -217,68 +237,32 @@ function Assert-Signature {
         $sig.Status, $sig.SignerCertificate.Subject, $sig.SignerCertificate.Thumbprint)
 }
 
-function Invoke-Sign {
-    # Signs through SignPath, promotes the SIGNED files into DIST_DIR and
-    # verifies their Authenticode signatures. Everything downstream must use
-    # DIST_DIR, never the unsigned inputs. The SignPath artifact configuration
-    # must sign both files at the root of the zip.
+function Invoke-PromoteSigned {
+    # Takes the SIGNED files the SignPath action extracted into SIGNED_DIR,
+    # verifies their Authenticode signatures and places them in DIST_DIR.
+    # Everything downstream must use DIST_DIR, never the unsigned inputs.
     # REQUIRE_TRUSTED_SIGNATURE=false accepts an untrusted chain (SignPath
     # test certificate) with a warning; true requires status 'Valid'.
     $app = Get-Setting APP_NAME
     $dist = Get-Setting DIST_DIR
+    $signed = Get-Setting SIGNED_DIR
     $files = "$app.ps1", "$app.exe"
     $requireTrusted = (Get-Setting REQUIRE_TRUSTED_SIGNATURE) -eq 'true'
-    $apiToken = Get-Setting SIGNPATH_API_TOKEN
 
-    $tempRoot = $env:RUNNER_TEMP ?? [IO.Path]::GetTempPath()
-    $work = Join-Path $tempRoot "signing-$([guid]::NewGuid().ToString('N'))"
-    $staging = Join-Path $work 'input'
-    $extracted = Join-Path $work 'signed'
-    $inputZip = Join-Path $work 'input.zip'
-    $outputZip = Join-Path $work 'output.zip'
-
-    try {
-        New-Item -ItemType Directory -Path $staging -Force | Out-Null
-        foreach ($file in $files) {
-            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
-                throw "Cannot sign missing file: $file"
-            }
-            Copy-Item -LiteralPath $file -Destination $staging
-        }
-        Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $inputZip -Force
-        Write-Host "Input zip: $inputZip"
-
-        # OutputArtifactPath is a zip file path, not a directory.
-        $submitParams = @{
-            InputArtifactPath  = $inputZip
-            ApiToken           = $apiToken
-            OrganizationId     = Get-Setting SIGNPATH_ORG_ID
-            ProjectSlug        = Get-Setting SIGNPATH_PROJECT_SLUG
-            SigningPolicySlug  = Get-Setting SIGNPATH_POLICY_SLUG
-            OutputArtifactPath = $outputZip
-            WaitForCompletion  = $true
-        }
-        Submit-SigningRequest @submitParams
-
-        if (-not (Test-Path -LiteralPath $outputZip -PathType Leaf)) {
-            throw "No signed zip was returned at $outputZip"
-        }
-        Expand-Archive -LiteralPath $outputZip -DestinationPath $extracted -Force
-        New-Item -ItemType Directory -Path $dist -Force | Out-Null
-
-        foreach ($file in $files) {
-            $found = @(Get-ChildItem -LiteralPath $extracted -Recurse -File |
-                Where-Object Name -EQ $file)
-            if ($found.Count -ne 1) {
-                throw "Expected exactly one signed '$file' in the output, found $($found.Count)"
-            }
-            $destination = Join-Path $dist $file
-            Copy-Item -LiteralPath $found[0].FullName -Destination $destination -Force
-            Assert-Signature -File $destination -RequireTrusted $requireTrusted
-        }
+    if (-not (Test-Path -LiteralPath $signed -PathType Container)) {
+        throw "No signed output directory found at $signed"
     }
-    finally {
-        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $dist -Force | Out-Null
+
+    foreach ($file in $files) {
+        $found = @(Get-ChildItem -LiteralPath $signed -Recurse -File |
+            Where-Object Name -EQ $file)
+        if ($found.Count -ne 1) {
+            throw "Expected exactly one signed '$file' in the output, found $($found.Count)"
+        }
+        $destination = Join-Path $dist $file
+        Copy-Item -LiteralPath $found[0].FullName -Destination $destination -Force
+        Assert-Signature -File $destination -RequireTrusted $requireTrusted
     }
 }
 
