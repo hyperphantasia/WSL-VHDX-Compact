@@ -29,8 +29,12 @@ env:
   APP_NAME: wsl2compact
   # Directory that holds exactly what gets attested, verified and released.
   DIST_DIR: dist
+  # Unsigned files handed to SignPath (uploaded as a GitHub artifact so that
+  # SignPath can fetch them itself and verify their origin).
+  UNSIGNED_DIR: unsigned
+  # Where the SignPath action extracts the signed files.
+  SIGNED_DIR: signed
   PS2EXE_VERSION: "1.0.18"
-  SIGNPATH_MODULE_VERSION: "4.4.6"
   SIGNPATH_PROJECT_SLUG: WSL-VHDX-Compact
   SIGNPATH_POLICY_SLUG: test-signing
   # 'false' only while using the test-signing policy (untrusted test
@@ -40,15 +44,16 @@ env:
 jobs:
   build:
     name: Build, sign and attest
-    runs-on: windows-2025
+    runs-on: windows-2025 # SignPath Foundation requires GitHub-hosted runners
     timeout-minutes: 25
     # Secrets/variables used here live in this environment, not at repo level:
-    #   secret SIGNPATH_API_TOKEN, variable SIGNPATH_ORGANIZATION_ID
+    #   secret SIGNPATH_API_TOKEN, secret SIGNPATH_ORGANIZATION_ID
     environment:
       name: build
 
     permissions:
       contents: read # checkout
+      actions: read # SignPath downloads the unsigned artifact from this run
       id-token: write # OIDC token for the attestation
       attestations: write # store the attestation
 
@@ -108,17 +113,43 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: ./.github/scripts/Build.ps1 -Task BuildExe
 
-      - name: Install reviewed SignPath module version
-        run: ./.github/scripts/Build.ps1 -Task InstallSignPath
+      # --- Signing with origin verification ---------------------------------
+      # SignPath must fetch the artifact from this workflow run itself, so the
+      # files are uploaded with actions/upload-artifact first. Uploading the
+      # folder puts both files at the root of the artifact zip, which is what
+      # the SignPath artifact configuration expects.
+      - name: Stage files for signing
+        run: ./.github/scripts/Build.ps1 -Task StageUnsigned
+
+      - name: Upload unsigned files (SignPath fetches them from GitHub)
+        id: upload-unsigned
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-files
+          if-no-files-found: error
+          retention-days: 1
+          path: ${{ env.UNSIGNED_DIR }}/
 
       # Waits on an external service, so it gets its own timeout. A
-      # release-signing policy with manual approval needs a much larger value.
-      - name: Sign with SignPath (signed files land in dist/)
+      # release-signing policy with manual approval needs a much larger value
+      # (also raise wait-for-completion-timeout-in-seconds, default 600).
+      # Pin to the commit SHA of the latest v3 tag, e.g.:
+      #   git ls-remote https://github.com/SignPath/github-action-submit-signing-request 'refs/tags/v3*'
+      - name: Sign with SignPath (origin-verified, signed files land in signed/)
         timeout-minutes: 15
-        env:
-          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-          SIGNPATH_ORG_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
-        run: ./.github/scripts/Build.ps1 -Task Sign
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ env.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ env.SIGNPATH_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: ${{ env.SIGNED_DIR }}
+
+      - name: Verify signatures and promote signed files to dist/
+        run: ./.github/scripts/Build.ps1 -Task PromoteSigned
+      # ----------------------------------------------------------------------
 
       - name: Generate checksums
         run: ./.github/scripts/Build.ps1 -Task Checksums
